@@ -1,0 +1,782 @@
+---
+title: 'Final Case: Telemarketing of Portuguese Bank'
+author: "Robert Malongo"
+date: "12/17/2019"
+output:
+  html_document:
+    code_folding: hide
+    df_print: paged
+    highlight: tango
+    number_sections: yes
+    theme: spacelab
+    toc: yes
+---
+
+```{r loadrelevantpackages, echo  =TRUE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(plotly)
+library(corrplot)
+library(data.table)
+library(broom)
+library(caTools)
+library(caret)
+library(gridExtra)
+library(gmodels)
+library(fastDummies)
+library(naivebayes)
+library(plotly)
+```
+
+# Basic Explanatory Analysis
+## Load Data
+This case is based around a real-world dataset about telemarketing calls made by a Portuguese
+bank. You can find more information about this dataset here: https://archive.ics.uci.edu/ml/datasets/bank+marketing
+
+```{r EDA_1  =TRUE, message=FALSE, warning=FALSE}
+# Set working directory
+setwd("~/Desktop/Fall 2019 Academics/Bus 256_Marketing Analytics/Final case")
+
+# Set Seed
+set.seed(12345)
+# Part 1 ------------------------------------------------------------------
+# import the data
+dta_bank <- fread("Bank Case.csv")
+```
+
+## Variable Description
+```{r EDA_2a  =TRUE, message=FALSE, warning=FALSE}
+str(dta_bank)
+```
+
+i) $age$: age of the client (numeric)
+ii) $job$: type of occupation of the client (categorical) 
+iii) $marital$: marital status  of the client (categorical)
+iv) $education$: education status of the client (categorical)
+v) $default$: if the client has previously failed to repay a debt including interest or principal on a loan (categorical)
+vi) $housing$: if the client has a housing loan (categorical)
+vii) $loan$: if the client has a personal loan (categorical)
+viii) $contact$: mode of communication with the client (categorical)
+ix) $month$:contact month with the client (categorical)
+x) $dayofweek$: contact day of the week with the client (categorical)
+xi) $duration$: duration of conversation with the client in seconds (numeric)
+xii) $y$: if the client has subscribed a bank term deposit (categorical)
+
+%>% 
+
+## Outlier Detection
+```{r EDA_2b  =TRUE, message=FALSE, warning=FALSE}
+age_sd <- sd(dta_bank$age)
+duration_sd <- sd(dta_bank$duration)
+age_mean <- mean(dta_bank$age)
+duration_mean <- mean(dta_bank$duration)
+
+ outlier_dta_bank <- dta_bank %>% 
+   mutate(outlier_age = ifelse(age > age_mean + 4*age_sd|age < age_mean - 4*age_sd, "yes", "no"),
+          outlier_duration = ifelse(duration > duration_mean + 4*duration_sd|duration < duration_mean -  4*duration_sd, "yes", "no"))
+ 
+
+outlier_age_tbl <- data.frame(table(outlier_dta_bank$outlier_age))
+colnames(outlier_age_tbl) <- c("outlier", "n.obs")
+outlier_age_tbl
+```
+$age$: Based on this definition of outlier, there are `r outlier_age_tbl[2,2]` observations (`r round( (outlier_age_tbl[2,2]/nrow(dta_bank))*100,3)`%) that are outliers in the $age$ variable. However, in order to preserve variation in the data, I still keep these observations
+
+```{r EDA_2b_duration  =TRUE, message=FALSE, warning=FALSE}
+outlier_duration_tbl <- data.frame(table(outlier_dta_bank$outlier_duration))
+colnames(outlier_duration_tbl) <- c("outlier", "n.obs")
+outlier_duration_tbl
+```
+$duration$: Based on this definition of an outlier, there are `r outlier_duration_tbl[2,2]` observations (`r round( (outlier_duration_tbl[2,2]/nrow(dta_bank))*100,3)`%) that are outliers in the $duration$ variable. However, in order to preserve variation in the data, I still keep these observations
+
+## Corrplot
+
+I used **One-hot encoding** to transform all categorical variables into numeric variables before computing the correlation matrix. As a result, the correlations that I obtained are scale independent which wouldn't have been the case if I had simply re-labelled the categories into numerical variables.
+
+```{r EDA_3  =TRUE, message=FALSE, warning=FALSE}
+# Create a corr-plot using the package corrplot.
+dta_bank_cor <- dta_bank
+
+dta_bank_cor <- fastDummies::dummy_cols(dta_bank_cor) %>%
+  mutate(y = ifelse(y == "yes", 1,0)) %>% 
+  select(y, everything(), -job, -marital, -education, -default,-housing, -loan, -contact,   -month,-day_of_week,-y_no, -y_yes)
+
+# First 18 variables
+cor_1 <-  cor(dta_bank_cor[,1:18])
+cor_plot_1 <- corrplot(cor_1,method = "circle",  tl.col ="black")
+
+# Next 18 variables
+cor_2 <-  cor(dta_bank_cor[,19:36])
+cor_plot_2 <- corrplot(cor_2,method = "circle",  tl.col ="black")
+
+# Next 17 variables
+cor_3 <-  cor(dta_bank_cor[,37:53])
+cor_plot_3 <- corrplot(cor_3,method = "circle",  tl.col ="black")
+rm(dta_bank_cor)
+```
+
+## Linear Regression
+This is regression where the dependent variables are all the other 11 variables and their levels.
+The model is estimated using a Linear Probability Model (LPM) as per the instructions
+
+### Structural Equation
+$y = \beta_{0} + \beta_{1} x_{1} + \beta_{2} x_{2} + \beta_{3} x_{3} \dots, \beta_{k}x_{k} + u$
+
+where $k = 42$
+
+### Analysis
+See the results in the table below arranged in descending order of the $estimate$ value
+```{r EDA_3  =TRUE, message=FALSE, warning=FALSE}
+# Part 4 ------------------------------------------------------------------
+ dta_bank <- fread("Bank Case.csv")
+ dta_bank <- dta_bank %>% 
+  mutate(y = ifelse(y == "yes", 1, 0),
+        month = factor(month, levels = c("mar", "apr", "may", "jun", "jul",
+                                         "aug", "sep", "oct", "nov", "dec")),
+        day_of_week = factor(day_of_week, levels = c("mon", "tue", "wed", "thu", "fri")),
+        job = factor(job, levels = c("unemployed", "services", "admin.", "blue-collar",
+                                    "technician", "retired", "management","housemaid",
+                                     "self-employed", "unknown", "entrepreneur", "student")))
+
+
+# a) Use: rmarkdown to rwite the equation
+
+# b
+lm <- lm(y ~., data = dta_bank) %>% 
+  tidy()
+
+# results table
+lm <- data.frame(lm) %>% 
+  mutate(
+         estimate = round(estimate,3),
+         std.error = round(std.error,3),
+         statistic = round(statistic,3),
+         p.value = round(p.value,3)) %>% 
+  arrange(desc(estimate))
+lm
+```
+
+ i) Best time to perform telemarketing tasks: With Monday being the baseline absorbed in the intercept,  **Tuesday** (0.17% probability) and **Wednesday** (0.17% higher probability) are the best weekdays. **March** is the best month since in my model, it is the baseline absorbed in the intercept and all coefficients on the month variables are negative. This means that's its probability is higher relative to the other 9 months. **December** and **October** come second and third respectively.
+ 
+ii) Best income groups: With unemployed being the baseline absorbed in the intercept, **students** (10.2% higher probability) and **retired** (4.8% higher probability) are the best income groups.
+iii) Potential concerns of omitted variable Bias: Since this is predictive modelling, omitted variable bias is less of an issue. The goal is to get optimal predictions based on a linear combination of whatever variables are available. However some variables that could be included to make our conclusions above more robust include:
+      a) Length of client relationship with the bank
+      b) Macroeconomic indicators i.e inflation, bank interest rates, exchange rates. 2008-2009 was the peak of the financial crisis and Portuguese was one of the worst affected countries
+
+# Predictive Modeling & Tuning
+
+## Responses & Stuctural Equations
+1) We split the data into training, validating, and testing data in order to 
+improve the accuracy and evaluate the performance of our predictive model without over-fitting the data. More specifically, we use the train data to fit our model using the parameters in the data. 
+Then, we use the validating data to tune the model and gauge how it might perform in testing data 
+without avoid over-fitting. Lastly, we use the testing data to evaluate the performance of 
+the model developed in the training and validating data
+
+2) In this predictive exercise, we need to drop the duration variable. This is because
+if $duration = 0$, then $y = 0$. However, the bank agent does not know the duration of
+each call prior to making the call. After the call, $y$ is known regardless of 
+of the call duration. Thus, the duration does not provide predictive information to the bank.
+I drop this variable in all my models.
+
+3) **Underfitting** refers to a model that can neither model the training data nor 
+generalize to new data. A model that under-fits the data often has low RMSPE which is the expected value of the squared error made by predicting Y for an observation in the training data.
+**Overfitting** refers to a model that too closely fit to a limited set of data points.
+In this case the model gets trained with so much of data such that it starts learning from the noise and inaccurate data entries in our data set. A model that is over-fit has higher accuracy on the
+training data than on the test data
+
+4) The No Free Lunch theorem (NFL) states that averaged over all problems, no optimization algorithm is 
+expected to perform better than another optimization algorithm. In machine learning,
+this implies that although a classifier can perform better on one particular data,
+the performance of all classifiers is the same when we average over all possible problems
+
+5) Structural equations: Note that there are only 10 months in the data starting from March to December
+
+     $lm1$: $y = \beta_{0} + \beta_{1} age + \beta_{2} apr + \beta_{3} may + \beta_{4} jun + \beta_{5}       jul + \beta_{6} aug + \beta_{7} sep + \beta_{8} oct + \beta_{9} nov + \beta_{10} dec + u$
+     
+     where $k = 10$ and  $\beta_{0} = pr(y = 1)$  in March
+
+    $lm2$: $y = \beta_{0} + \beta_{1} age + \beta_{2} age^{2} + \beta_{3} age ^{3} + \beta_{4} apr +        \beta_{5} may + \beta_{6} jun + \beta_{7} jul + \beta_{8} aug + \beta_{9} sep + \beta_{10} oct +        \beta_{11} nov + \beta_{12} dec + u$
+     
+     where $k = 12$ and  $\beta_{0} = pr(y = 1)$  in March
+     
+    $lm3$: $y = \beta_{0} + \beta_{1} x_{1} + \beta_{2} x_{2} + \beta_{3} x_{3} \dots, \beta_{k}x_{k} +     u$
+
+    where $k = 42$
+    
+    $lm4$: $y = \beta_{0} + \beta_{1} age^{2} + \dots, \beta_{k}x_{k} + u$
+       
+       where $k = 43$ . This is because $age$ is the only numeric variable. The remanining variables are        all categorical
+       
+## Sampling, Modelling & Results
+```{r PMT_samp  =TRUE, message=FALSE, warning=FALSE}
+# Sampling---------------------------------------------------------------------
+dta_bank <- dta_bank %>% 
+  select(-duration)
+# Split data into train, validation and  test datasets: 80%:10%:10%
+
+# Split into training and test
+dta_bank_sample <-  sample.split(dta_bank$y, SplitRatio = .9)
+
+# Test data: 10%
+test_dta_bank <-  subset(dta_bank,  dta_bank_sample == FALSE)
+
+# Split training data into training and validation
+train_valid_dta_bank <- subset(dta_bank,  dta_bank_sample == TRUE)
+
+train_valid_sample_dta_bank <-  sample.split(train_valid_dta_bank$y, SplitRatio = .9)
+
+# Train data: 80%
+train_dta_bank <- subset(train_valid_dta_bank, train_valid_sample_dta_bank == TRUE)
+
+# Validation data: 10%
+valid_dta_bank <- subset(train_valid_dta_bank, train_valid_sample_dta_bank == FALSE)
+
+# remove used data
+rm(train_valid_sample_dta_bank, train_valid_dta_bank, dta_bank_sample)
+```
+ 
+### $lm1$
+Confusion matrix
+```{r PMT_lm1  =TRUE, message=FALSE, warning=FALSE} 
+ lm_1 <- lm(y~age + factor(month),  data = train_dta_bank) 
+
+# Valid data
+# Predict values: Valid data
+lm_1_pred_valid <- predict(lm_1, newdata = valid_dta_bank, type ="response")
+
+# Compute a confusion matrix
+confus_mat_lm_1_valid <- confusionMatrix(
+  data = factor(as.numeric(lm_1_pred_valid>=0.5)), 
+  reference = factor(valid_dta_bank$y))
+
+# Accuracy
+accuracy_valid_lm_1 <- round(((confus_mat_lm_1_valid$table[1,1] + confus_mat_lm_1_valid$table[2,2])/
+                                sum(confus_mat_lm_1_valid$table))*100,3)
+
+# Test data
+# Predict values: Test data
+lm_1_pred <- predict(lm_1, newdata = test_dta_bank, type ="response")
+
+# Compute a confusion matrix
+confus_mat_lm_1 <- confusionMatrix(
+                                  data = factor(as.numeric(lm_1_pred>=0.5)), 
+                                  reference = factor(test_dta_bank$y))
+
+accuracy_test_lm_1 <- round(((confus_mat_lm_1$table[1,1] + confus_mat_lm_1$table[2,2])/
+                     sum(confus_mat_lm_1$table))*100,3)
+
+# RMSPE
+RMSPE_lm_1_test <- round(RMSE(lm_1_pred,test_dta_bank$y),3)
+RMSPE_lm_1_valid <- round(RMSE(lm_1_pred_valid,valid_dta_bank$y),3)
+
+# Remove used data sets
+rm(list = ls(pattern = "^lm_1"))
+# Print confusion matrix
+confus_mat_lm_1$table
+```
+
+### $lm2$
+Confusion matrix
+```{r PMT_lm2  =TRUE, message=FALSE, warning=FALSE} 
+# lm2 ---------------------------------------------------------------------
+# estimated model
+lm_2 = lm(y~age+ I(age^2) + I(age^3)+factor(month),data= train_dta_bank)
+# Valid data
+# Predict values: Valid data
+lm_2_pred_valid <- predict(lm_2, newdata = valid_dta_bank, type ="response")
+
+# Compute a confusion matrix
+confus_mat_lm_2_valid <- confusionMatrix(
+  data = factor(as.numeric(lm_2_pred_valid>=0.5)), 
+  reference = factor(valid_dta_bank$y))
+
+# Accuracy
+accuracy_valid_lm_2 <- round(((confus_mat_lm_2_valid$table[1,1] + confus_mat_lm_2_valid$table[2,2])/
+                                sum(confus_mat_lm_2_valid$table))*100,3)
+
+# Test data
+# Predict values: Test data
+lm_2_pred <- predict(lm_2, newdata = test_dta_bank, type ="response")
+
+# Compute a confusion matrix
+confus_mat_lm_2 <- confusionMatrix(
+  data = factor(as.numeric(lm_2_pred>=0.5)), 
+  reference = factor(test_dta_bank$y))
+
+accuracy_test_lm_2 <- round(((confus_mat_lm_2$table[1,1] + confus_mat_lm_2$table[2,2])/
+                               sum(confus_mat_lm_2$table))*100,3)
+
+# RMSPE
+RMSPE_lm_2_test <- round(RMSE(lm_2_pred,test_dta_bank$y),3)
+RMSPE_lm_2_valid <- round(RMSE(lm_2_pred_valid,valid_dta_bank$y),3)
+
+# Remove used data sets
+rm(list = ls(pattern = "^lm_2"))
+# Print confusion matrix
+confus_mat_lm_2$table
+```
+
+### $lm3$
+Confusion matrix
+
+```{r PMT_lm3  =TRUE, message=FALSE, warning=FALSE} 
+# lm_3 --------------------------------------------------------------------
+# estimated model
+lm_3 = lm(y~.,data= train_dta_bank)
+
+# Valid data
+# Predict values: Valid data
+lm_3_pred_valid <- predict(lm_3, newdata = valid_dta_bank, type ="response")
+
+# Compute a confusion matrix
+confus_mat_lm_3_valid <- confusionMatrix(
+  data = factor(as.numeric(lm_3_pred_valid>=0.5)), 
+  reference = factor(valid_dta_bank$y))
+
+# Accuracy
+accuracy_valid_lm_3 <- round(((confus_mat_lm_3_valid$table[1,1] + confus_mat_lm_3_valid$table[2,2])/
+                                sum(confus_mat_lm_3_valid$table))*100,3)
+
+# Test data
+# Predict values: Test data
+lm_3_pred <- predict(lm_3, newdata = test_dta_bank, type ="response")
+
+# Compute a confusion matrix
+confus_mat_lm_3 <- confusionMatrix(
+  data = factor(as.numeric(lm_3_pred>=0.5)), 
+  reference = factor(test_dta_bank$y))
+
+accuracy_test_lm_3 <- round(((confus_mat_lm_3$table[1,1] + confus_mat_lm_3$table[2,2])/
+                               sum(confus_mat_lm_3$table))*100,3)
+
+# RMSPE
+RMSPE_lm_3_test <- round(RMSE(lm_3_pred,test_dta_bank$y),3)
+RMSPE_lm_3_valid <- round(RMSE(lm_3_pred_valid,valid_dta_bank$y),3)
+
+# Remove used data sets
+rm(list = ls(pattern = "^lm_3"))
+# Print confusion matrix
+confus_mat_lm_3$table
+```
+
+### $lm4$
+Confusion Matrix
+
+```{r PMT_lm4  =TRUE, message=FALSE, warning=FALSE} 
+# lm_4 --------------------------------------------------------------------
+# lm4 = lm(y~.^2, data=????)
+
+# estimated model: Since age is the on continous varaible which can be squared
+lm_4 <-  lm(y ~. + I(age^2), data= train_dta_bank)
+
+# Valid data
+# Predict values: Valid data
+lm_4_pred_valid <- predict(lm_4, newdata = valid_dta_bank, type ="response")
+
+# Compute a confusion matrix
+confus_mat_lm_4_valid <- confusionMatrix(
+  data = factor(as.numeric(lm_4_pred_valid>=0.5)), 
+  reference = factor(valid_dta_bank$y))
+
+# Accuracy
+accuracy_valid_lm_4 <- round(((confus_mat_lm_4_valid$table[1,1] + confus_mat_lm_4_valid$table[2,2])/
+                                sum(confus_mat_lm_4_valid$table))*100,3)
+
+# Test data
+# Predict values: Test data
+lm_4_pred <- predict(lm_4, newdata = test_dta_bank, type ="response")
+
+# Compute a confusion matrix
+confus_mat_lm_4 <- confusionMatrix(
+  data = factor(as.numeric(lm_4_pred>=0.5)), 
+  reference = factor(test_dta_bank$y))
+
+accuracy_test_lm_4 <- round(((confus_mat_lm_4$table[1,1] + confus_mat_lm_4$table[2,2])/
+                               sum(confus_mat_lm_4$table))*100,3)
+
+# RMSPE
+RMSPE_lm_4_test <- round(RMSE(lm_4_pred,test_dta_bank$y),3)
+RMSPE_lm_4_valid <- round(RMSE(lm_4_pred_valid,valid_dta_bank$y),3)
+
+# Print confusion matrix
+confus_mat_lm_4$table
+```
+
+### Analysis
+```{r PMT_analysis  =TRUE, message=FALSE, warning=FALSE}
+# Collect all errors and accurracies
+model <- c(1:4)
+accuracy_test <- c(accuracy_test_lm_1, accuracy_test_lm_2, accuracy_test_lm_3, accuracy_test_lm_4)
+accuracy_valid <- c(accuracy_valid_lm_1, accuracy_valid_lm_2, accuracy_valid_lm_3, accuracy_valid_lm_4)
+RMSPE_test <- c(RMSPE_lm_1_test,RMSPE_lm_2_test, RMSPE_lm_3_test, RMSPE_lm_4_test)
+RMSPE_valid <- c(RMSPE_lm_1_valid,RMSPE_lm_2_valid, RMSPE_lm_3_valid, RMSPE_lm_4_valid)
+
+model_sum <- cbind(model,accuracy_valid,accuracy_test,RMSPE_valid,RMSPE_test )
+model_sum 
+lm_3_over_fit <-  accuracy_valid_lm_3 - accuracy_test_lm_3
+```
+
+a) Model 3 marginally over-fits the data. This is because the accuracy on this model in the 
+validating data of `r accuracy_valid_lm_3`% is greater than its accuracy in the testing data `r accuracy_test_lm_3`%.
+However, this over-fitting by only a small margin since the difference the two accuracies is only 
+`r lm_3_over_fit`%
+
+b) Model 2 under-fits the data. This model has the lowest accuracy in the test data of `r accuracy_test_lm_2`%
+and the second highest RMSPE of `r RMSPE_lm_2_test`. This suggest that we can tune this model to become more complex.
+At the current state, this model is marginally unable to capture the relationship between the the Xs and the Y as compare to the other models
+
+c) Yes, the model that fits the training data the best is model 4 since it has the lowest RMSPE of `r RMSPE_lm_4_test`. This model also has the highest predictive power (accuracy) of `r accuracy_test_lm_4`% in the testing data
+
+d) Please see the results of the confusion matrices above
+
+e) Based on these results, the best model of this data is model 4. This model is balanced
+as it neither under-fits nor over-fits the data. This model achieves the highest accuracy and 
+lowest RMSPE
+
+# Improving the Predictive Power
+## Visualizations
+The plots below are all interactive and you can hover through each plot to inspect the numbers. Also note the following:
+
+i) Predicted Y = $Pr(Y= 1)$ for Model 4 which is my best model
+ii) Since this is a Linear Probability Model (LPM), $0 < Pr(Y = 1|X) > 1$. The predicted probabilities can be $<0$ or $>1$. See here: https://en.wikipedia.org/wiki/Linear_probability_model
+
+```{r IPP_viz_age  =TRUE, message=FALSE, warning=FALSE}
+# Visualizations ----------------------------------------------------------------------
+dta_bank_plots <- fread("Bank Case.csv") %>% 
+  mutate(
+        month = factor(month, levels = c("mar", "apr", "may", "jun", "jul",
+                                         "aug", "sep", "oct", "nov", "dec")),
+        day_of_week = factor(day_of_week, levels = c("mon", "tue", "wed", "thu", "fri")),
+        job = factor(job, levels = c("unemployed", "services", "admin.", "blue-collar",
+                                    "technician", "retired", "management","housemaid",
+                                     "self-employed", "unknown", "entrepreneur", "student")))
+
+
+test_dta_bank_plots <- test_dta_bank %>% 
+  cbind(lm_4_pred)
+# Age
+p1 <- ggplot(data = test_dta_bank_plots, aes(x=age, y=lm_4_pred)) + geom_point(alpha = 0.3,
+                                                                                size =1,
+                                                                               col ="blue") +
+  ggtitle("Predicted Y vs Age") + xlab("Age") + ylab("Predicted Y") +
+  stat_smooth(method = "lm", formula = y ~ x + I(x^2), size = 1, color = "black", se = FALSE) +
+  theme(
+    legend.position = "none",
+    panel.border = element_blank(),  
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank(),
+    axis.line = element_line(colour = "black"))
+p1 <- ggplotly(p1)
+p1
+```
+
+There appears to be no linear relationship between the Predicted Y ($Pr(Y= 1)$) and age. Instead the relationship is rather **parabolic** as shown in the plots above. This suggests that the probability of loan subscription is higher for young people (below 30 years) and old people (above 60 years). The probability is rather low for those in middle age between 30 and 60. This supports the earlier finding that the best income groups to target are students and retired people. Unsurprisingly this would also apply to $age^{2}$ and $age^{3}$.
+
+```{r IPP_viz_px_2  =TRUE, message=FALSE, warning=FALSE}
+# Job type
+p5 <- ggplot(data = test_dta_bank_plots, aes(x= reorder(job, lm_4_pred),  y = lm_4_pred, fill  =job)) + geom_boxplot() + 
+  ggtitle("Job type") + xlab("Job Type") + ylab("Predicted Y") +
+  theme(legend.position = "none",
+  panel.border = element_blank(),  
+  panel.grid.minor = element_blank(),
+  panel.background = element_blank(),
+  axis.line = element_line(colour = "grey"))  +
+  coord_flip()
+p5 <- ggplotly(p5)
+p5
+```
+As seen from the box plots above the probability for loan subscription is highest for **students** and **retired** people. People in blue-collar and services jobs have the lowest probability.
+
+```{r IPP_viz_px_6  =TRUE, message=FALSE, warning=FALSE}
+
+# Marital status
+p6 <- ggplot(data = test_dta_bank_plots, aes(x= reorder(marital, lm_4_pred),  y = lm_4_pred, fill =marital)) + geom_boxplot() + 
+  ggtitle("Predicted Y vs Marital status") + xlab("Marital status") + ylab("Predicted Y") +
+  theme(legend.position = "none",
+  panel.border = element_blank(),  
+  panel.grid.minor = element_blank(),
+  panel.background = element_blank(),
+  axis.line = element_line(colour = "grey")) 
+p6 <- ggplotly(p6)
+p6
+```
+As seen from the box plots above the probability for loan subscription is highest for clients who are **single**. Divorced people have the lowest probability.
+
+```{r IPP_viz_px_7  =TRUE, message=FALSE, warning=FALSE}
+# Education
+p7 <- ggplot(data = test_dta_bank_plots, aes(x= reorder(education, lm_4_pred),  y = lm_4_pred, fill =education)) + geom_boxplot() + coord_flip() +
+  ggtitle("Predicted Y vs Education status") + xlab("Education status") + ylab("Predicted Y") +
+  theme(legend.position = "none",
+  panel.border = element_blank(),  
+  panel.grid.minor = element_blank(),
+  panel.background = element_blank(),
+  axis.line = element_line(colour = "grey")) 
+p7 <- ggplotly(p7)
+p7
+```
+As seen from the box plots above the probability for loan subscription is highest for **illetrate** and **university degree** clients. Clients with basic.6y and basic.9y education background have the lowest probability.
+
+```{r IPP_viz_px_8  =TRUE, message=FALSE, warning=FALSE}
+# Default
+p8 <- ggplot(data = test_dta_bank_plots, aes(x= reorder(default, lm_4_pred),  y = lm_4_pred, fill =default)) + geom_boxplot() +
+  ggtitle("Predicted Y vs default status") + xlab("Default status") + ylab("Predicted Y") +
+  theme(legend.position = "none",
+  panel.border = element_blank(),  
+  panel.grid.minor = element_blank(),
+  panel.background = element_blank(),
+  axis.line = element_line(colour = "grey")) 
+p8 <- ggplotly(p8)
+p8
+```
+As seen from the box plots above the probability for loan subscription is highest for clients who have never default on a loan before.
+
+```{r IPP_viz_px_9  =TRUE, message=FALSE, warning=FALSE}
+# Housing loan
+p9 <- ggplot(data = test_dta_bank_plots, aes(x= reorder(housing, lm_4_pred),  y = lm_4_pred, fill =housing)) + geom_boxplot() +
+  ggtitle("Predicted Y vs Housing loan status") + xlab("Housing loan status") + ylab("Predicted Y") +
+  theme(legend.position = "none",
+  panel.border = element_blank(),  
+  panel.grid.minor = element_blank(),
+  panel.background = element_blank(),
+  axis.line = element_line(colour = "grey")) 
+p9 <- ggplotly(p9)
+p9
+```
+As seen from the box plots above the probability for loan subscription is highest for clients with **unknown** housing loan status. Clients with without a housing loan have the lowest probability of loan subscription
+
+```{r IPP_viz_px_10  =TRUE, message=FALSE, warning=FALSE}
+# Personal Loan 
+p10 <- ggplot(data = test_dta_bank_plots, aes(x= reorder(loan, lm_4_pred),  y = lm_4_pred, fill =loan)) + geom_boxplot() +
+  ggtitle("Predicted Y vs Personal loan status") + xlab("Persaonl loan status") + ylab("Predicted Y") +
+  theme(legend.position = "none",
+  panel.border = element_blank(),  
+  panel.grid.minor = element_blank(),
+  panel.background = element_blank(),
+  axis.line = element_line(colour = "grey")) 
+p10 <- ggplotly(p10)
+p10
+```
+As seen from the box plots above, the probability for loan subscription is highest for clients with **unknown** personal loan status. Clients with without a personal loan have the lowest probability of loan subscription.
+
+```{r IPP_viz_px_11  =TRUE, message=FALSE, warning=FALSE}
+# Contact status
+p11 <- ggplot(data = test_dta_bank_plots, aes(x= reorder(contact, lm_4_pred),  y = lm_4_pred, fill =contact)) + geom_boxplot() +
+  ggtitle("Predicted Y vs contact status") + xlab("Contact status") + ylab("Predicted Y") +
+  theme(legend.position = "none",
+  panel.border = element_blank(),  
+  panel.grid.minor = element_blank(),
+  panel.background = element_blank(),
+  axis.line = element_line(colour = "grey")) 
+p11 <- ggplotly(p11)
+p11
+```
+The box plots above shows that the probability for loan subscription is highest if clients are contacted via **cellular** phone instead of a telephone
+
+```{r IPP_viz_px_12  =TRUE, message=FALSE, warning=FALSE}
+# Month of the year
+p12 <- ggplot(data = test_dta_bank_plots, aes(x= month, y = lm_4_pred, fill =month)) + geom_boxplot() +
+  ggtitle("Predicted Y vs Month") + xlab("Month") + ylab("Predicted Y") +
+  theme(legend.position = "none",
+  panel.border = element_blank(),  
+  panel.grid.minor = element_blank(),
+  panel.background = element_blank(),
+  axis.line = element_line(colour = "grey")) 
+p12 <- ggplotly(p12)
+p12
+```
+The box plots above shows that the probability for loan subscription is highest in **March** and **December**. This supports our earlier finding that these two months are the best times to contact clients. The probability is lowest in May and June.
+
+```{r IPP_viz_px_13  =TRUE, message=FALSE, warning=FALSE}
+# Day of week
+p13 <- ggplot(data = test_dta_bank_plots, aes(x= day_of_week, y = lm_4_pred, fill =day_of_week)) + geom_boxplot() +
+  ggtitle("Predicted Y vs Day of the Week") + xlab("Weekday") + ylab("Predicted Y") +
+  theme(legend.position = "none",
+  panel.border = element_blank(),  
+  panel.grid.minor = element_blank(),
+  panel.background = element_blank(),
+  axis.line = element_line(colour = "grey")) 
+p13 <- ggplotly(p13)
+p13
+rm(list = ls())
+```
+The box plots above shows that the probability for loan subscription if clients are contacted on **Wednesday** and **Thursday**. This supports our earlier finding that these two days are the best times to contact clients. The probability is lowest on Monday.
+
+
+## Classifier Comparison
+### K Nearest Neighbors - KNN
+```{r IPP_knn  =TRUE, message=FALSE, warning=FALSE}
+# KNN ---------------------------------------------------------------------
+# Convert to factors
+
+dta_bank_knn <- fread("Bank Case.csv") %>% 
+  mutate(y = ifelse(y == "yes", 1, 0),
+  # Normalize numeric variable      
+          age = scale(age))%>% 
+  # Remove duration variable
+  select(-duration)
+
+dta_bank_knn<- fastDummies::dummy_cols(dta_bank_knn) %>% 
+  select(-job, -marital, -education, -default,-housing, -loan, -contact, -month, -day_of_week ) %>% 
+  select(y, everything())
+# Sampling KNN---------------------------------------------------------------------
+# Split data into train, validation and  test datasets: 80%:10%:10%
+
+# Split into training and test
+dta_bank_sample <-  sample.split(dta_bank_knn$y, SplitRatio = .9)
+
+# Test data: 10%
+test_dta_bank <-  subset(dta_bank_knn,  dta_bank_sample == FALSE)
+
+# Split training data into training and validation
+train_valid_dta_bank <- subset(dta_bank_knn,  dta_bank_sample == TRUE)
+
+train_valid_sample_dta_bank <-  sample.split(train_valid_dta_bank$y, SplitRatio = .9)
+
+# Train data: 80%
+train_dta_bank <- subset(train_valid_dta_bank, train_valid_sample_dta_bank == TRUE)
+
+# Validation data: 10%
+valid_dta_bank <- subset(train_valid_dta_bank, train_valid_sample_dta_bank == FALSE)
+
+# remove used data
+rm(train_valid_sample_dta_bank, train_valid_dta_bank, dta_bank_sample)
+
+# create labels for training, valid, and test data
+train_dta_labels = train_dta_bank[, 1] 
+valid_dta_labels = valid_dta_bank[, 1] 
+test_dta_labels  = test_dta_bank[, 1]
+
+# Training model on validating data                            
+knn_valid_pred = class::knn(train = train_dta_bank,
+                           cl    = train_dta_labels,
+                           test  = valid_dta_bank,
+                             k   = 1)
+
+# Evaluating performance on validating data                          
+k1_valid_conf_mat  =   gmodels::CrossTable(x    = valid_dta_labels, 
+                                           y    = knn_valid_pred,
+                                     prop.chisq = TRUE)
+# Accuracy
+k1_valid_accuracy <- round(((k1_valid_conf_mat$t[1,1] + k1_valid_conf_mat$t[2,2])/
+                   sum(k1_valid_conf_mat$t))*100,3)
+
+# Training model on test data                            
+knn_test_pred = class::knn(train = train_dta_bank,
+                            cl = train_dta_labels,
+                            test  = test_dta_bank,
+                            k  = 1)
+
+# Evaluating performance on training data                          
+k1_test_conf_mat  =   gmodels::CrossTable(x    = test_dta_labels, 
+                                           y    = knn_test_pred,
+                                                 prop.chisq = TRUE)
+
+# Accuracy
+k1_test_accuracy <- round(((k1_test_conf_mat$t[1,1] + k1_test_conf_mat$t[2,2])/
+                              sum(k1_test_conf_mat$t))*100,3)
+
+# RMSPE
+RMSPE_knn_test <- round(RMSE(as.numeric(knn_test_pred),test_dta_bank$y),3)
+RMSPE_knn_valid <- round(RMSE(as.numeric(knn_valid_pred),valid_dta_bank$y),3)
+
+# Remove used data sets
+rm(list = ls(pattern = "^knn"))
+```
+
+### Naive Bayes - NB
+```{r NB  =TRUE, message=FALSE, warning=FALSE}
+# Naive bayes -------------------------------------------------------------
+
+# Estimate model: Validation data
+NBclassifier_valid <- naivebayes::naive_bayes(formula      = factor(y)~.,
+                                     usekernel = T,
+                                     data      = train_dta_bank)
+
+valid_pred <- predict(NBclassifier_valid,newdata = valid_dta_bank)
+
+# Compute a confusion matrix 
+confus_mat_valid <- confusionMatrix(
+  data = factor(valid_pred), 
+  reference = factor(valid_dta_bank$y))
+
+confus_mat_valid$table
+NB_valid_accuracy <- round(((confus_mat_valid$table[1,1] + confus_mat_valid$table[2,2])/
+                               sum(confus_mat_valid$table))*100,3)
+
+
+# Estimate model: Test data
+NBclassifier_test <- naivebayes::naive_bayes(formula      = factor(y)~.,
+                                        usekernel = T,
+                                        data      = train_dta_bank)
+
+test_pred <- predict(NBclassifier_test ,newdata = test_dta_bank)
+
+# Compute a confusion matrix 
+confus_mat_test <- confusionMatrix(
+  data = factor(test_pred), 
+  reference = factor(test_dta_bank$y))
+
+confus_mat_test$table
+NB_test_accuracy <- round(((confus_mat_test$table[1,1] + confus_mat_test$table[2,2])/
+                              sum(confus_mat_test$table))*100,3)
+
+# RMSPE
+RMSPE_NB_test <- round(RMSE(as.numeric(test_pred),test_dta_bank$y),3)
+RMSPE_NB_valid <- round(RMSE(as.numeric(valid_pred),valid_dta_bank$y),3)
+```
+
+### Analyisis
+```{r analysis_KNN_NB  =TRUE, message=FALSE, warning=FALSE}
+# Compile results
+model <- c("KNN", "Naive Bayes")
+KNN <-  c(k1_valid_accuracy,k1_test_accuracy, RMSPE_knn_valid, RMSPE_NB_test)
+NB <- c(NB_valid_accuracy, NB_test_accuracy, RMSPE_NB_valid, RMSPE_NB_test)
+Metric <- c("Accuracy", "Accuracy", "RMSPE", "RMSPE")
+Data <- c("Validating", "Testing", "Validating", "Testing")
+# Results tables
+model_knn_nb <- cbind(Data,Metric, KNN, NB)
+model_knn_nb
+knn_overfit <- as.numeric(k1_valid_accuracy) - as.numeric(k1_test_accuracy)
+```
+
+I applied NB and KNN classifiers on on model 4 which I had identified as the most balanced
+model. We notice that the accuracy increases in KNN to `r k1_test_accuracy`%. However KNN is over-fitting as its accuracy is lower in the testing data than the validating data by `r knn_overfit`%.  
+
+On the contrary the accuracy of NB model (`r NB_test_accuracy`%) is slightly lower than that of model 4. Also, the RMSPE of `r RMSPE_NB_valid` doesn't change between the validating and testing data.
+
+These results suggest that model 4 ($lm4$) is still the best predictive classifier for this data.
+
+# Causal Questions
+
+1) Marketing applications
+a) In marketing it would be better to use a causal analysis approach when 
+we want to determine whether a particular $X$ variable (e.g ad exposure or expenditure) affects the 
+the dependent $Y$ variable (purchase decision or sales) respectively.
+In particular, we might want to assess the effectiveness of an advertising
+campaign on consumer purchasing decision.
+
+b) Biased estimates in linear regression entail that our estimates either over-estimate or
+underestimate the true value of the population parameter. Apart from data collection errors,
+the most common cause of biased coefficient estimates in causal analysis is omitted variable bias.
+This occurs when there are variables that both affect the dependent variable and are correlated with the
+variables that are currently in the model. In this situation, the estimated coefficient are biased
+and we cannot make accurate inference on causality
+
+2) Examples of causal analysis in marketing
+a) $Y$ = Purchase decision (categorical "yes" or "no"), $X$ =  ad exposure of shoes on Google (categorical), Company = Nike
+b) $Y$ = Sales volume (numeric), $X$ = marketing or ad expenditure on TVs & Social Media (numeric), 
+Company = Coca-Cola
+c) $Y$ = Sales volume (numeric), $X$ = iPhone color designs (categorical), Company = Apple
+
+3) Omitted variable
+a) Customer income: Customers with higher income are more likely to purchase Nike Shoes
+and are also more likely to have internet see the add on Google. Also Google is banned in some
+countries and these results can result to an upward bias on $X$ estimate
+
+b) Customer age: Coke consumption varies widely across age groups bases on health choices
+and use of TVs and social media also varies widely across age groups. As result, 
+age is correlated with both $Y$ and $X$ in this model
+
+c) Price of iPhone: iPhones designs (Gold or Silver color) require different raw
+materials hence the price is correlated with the $X$ variable. Also, Price is correlated with sale volume since it might be that more expensive iPhones have better features. As a result, price is an omitted variable which can lead to biased estimates on the $X$ variable.
+
